@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AA Oyunu</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #ffffff;
+            padding: 0;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .game-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            background: #ffffff;
+        }
+
+        canvas {
+            border-radius: 10px;
+            max-width: 95vmin;
+            max-height: 95vmin;
+            width: auto;
+            height: auto;
+            background: #ffffff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        #score {
+            color: #333333;
+            font-size: 28px;
+            margin: 20px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .instructions {
+            color: #666;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 16px;
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+        }
+
+        .btn-restart {
+            background: #333333;
+            border: none;
+            padding: 10px 30px;
+            color: white;
+            border-radius: 25px;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: all 0.3s ease;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .btn-restart:hover {
+            background: #000000;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        @media (max-width: 500px) {
+            #score {
+                font-size: 24px;
+            }
+
+            .instructions {
+                font-size: 14px;
+                padding: 0 20px;
+            }
+
+            .btn-restart {
+                padding: 8px 20px;
+                font-size: 14px;
+            }
+        }
+
+        /* Bildirim stili ekle */
+        .level-notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 1000;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+
+        .level-notification.show {
+            transform: translate(-50%, -50%) scale(1);
+            opacity: 1;
+        }
+
+        .level-notification h2 {
+            margin: 0;
+            font-size: 24px;
+            color: #fff;
+        }
+
+        .level-notification p {
+            margin: 10px 0 0 0;
+            font-size: 18px;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div id="score">Skor: 0</div>
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <button class="btn-restart" onclick="resetGame()">Yeniden Başlat</button>
+        <div class="instructions">
+            Space tuşuna basın veya ekrana tıklayın
+        </div>
+    </div>
+
+    <!-- Bildirim div'ini ekle -->
+    <div class="level-notification" id="levelNotification">
+        <h2>Tebrikler!</h2>
+        <p></p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+
+        let score = 0;
+        let gameOver = false;
+        let pins = [];
+        let currentPin = null;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = canvas.width * 0.45;
+        let rotationSpeed = 0.02;
+
+        // Level sistemi için yeni değişkenler
+        let currentLevel = 1;
+        let targetPins = 5; // İlk seviye için hedef pin sayısı
+        
+        // Level bilgisi için HTML'e yeni element ekleyelim
+        const levelElement = document.createElement('div');
+        levelElement.style.cssText = `
+            color: #333333;
+            font-size: 24px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+        `;
+        document.querySelector('.game-container').insertBefore(levelElement, scoreElement);
+        
+        // Hedef bilgisi için HTML element
+        const targetElement = document.createElement('div');
+        targetElement.style.cssText = `
+            color: #666;
+            font-size: 18px;
+            margin: 5px 0;
+            text-align: center;
+        `;
+        document.querySelector('.game-container').insertBefore(targetElement, scoreElement);
+
+        const colors = {
+            primary: '#333333',
+            secondary: '#000000',
+            moving: '#ff6b6b',
+            collision: '#ff0000',
+            border: '#333333'
+        };
+
+        const mainCircle = {
+            x: centerX,
+            y: centerY,
+            radius: 25
+        };
+
+        class Pin {
+            constructor(angle) {
+                this.angle = angle;
+                this.distance = radius;
+                this.isMoving = false;
+                this.headSize = 10;
+                this.startX = 0;
+                this.startY = 0;
+                this.endX = 0;
+                this.endY = 0;
+                this.stuckDistance = 0;
+                this.targetStuckDistance = 15;
+                this.isColliding = false;
+            }
+
+            draw() {
+                this.startX = centerX + Math.cos(this.angle) * this.distance;
+                this.startY = centerY + Math.sin(this.angle) * this.distance;
+                
+                let pinEndDistance = this.distance + this.stuckDistance;
+                if (!this.isMoving && this.stuckDistance < this.targetStuckDistance) {
+                    this.stuckDistance += 1;
+                }
+                
+                this.endX = centerX + Math.cos(this.angle) * (pinEndDistance - (radius - mainCircle.radius));
+                this.endY = centerY + Math.sin(this.angle) * (pinEndDistance - (radius - mainCircle.radius));
+                
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = colors.primary;
+                
+                const pinColor = this.isColliding ? colors.collision : 
+                                (this.isMoving ? colors.moving : colors.primary);
+                
+                ctx.strokeStyle = pinColor;
+                ctx.fillStyle = pinColor;
+                
+                ctx.beginPath();
+                ctx.moveTo(this.startX, this.startY);
+                ctx.lineTo(this.endX, this.endY);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.arc(this.startX, this.startY, this.headSize, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.shadowBlur = 0;
+            }
+
+            update() {
+                if (!this.isMoving) {
+                    this.angle += rotationSpeed;
+                } else {
+                    this.distance -= 8;
+                    if (this.distance <= radius) {
+                        this.distance = radius;
+                        this.isMoving = false;
+                        checkCollision(this);
+                    }
+                }
+            }
+        }
+
+        // Level bilgilerini güncelle
+        function updateLevelInfo() {
+            levelElement.textContent = `Level ${currentLevel}`;
+            targetElement.textContent = `Hedef: ${score}/${targetPins}`;
+        }
+
+        // Bildirim elementi
+        const notification = document.getElementById('levelNotification');
+        const notificationText = notification.querySelector('p');
+
+        // Bildirim gösterme fonksiyonu
+        function showNotification(message, duration = 2000) {
+            notificationText.textContent = message;
+            notification.classList.add('show');
+            
+            // Belirtilen süre sonra bildirimi kaldır
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, duration);
+        }
+
+        // Ses efektleri için Audio nesneleri
+        const gameOverSound = new Audio('mixkit-sad-game-over-trombone-471.wav');
+        const shootSound = new Audio('bow-and-arrow-shoot-sound-effect-2-239699.mp3');
+        const backgroundMusic = new Audio('HEROICCC(chosic.com).mp3');
+        
+        // Ses ayarları
+        backgroundMusic.loop = true;
+        backgroundMusic.volume = 0.3;
+        shootSound.volume = 0.3;
+
+        // Seviye atlama kontrolünü güncelle
+        function checkLevelUp() {
+            if (score >= targetPins) {
+                currentLevel++;
+                targetPins = Math.ceil(targetPins * 1.5);
+                rotationSpeed += 0.003;
+                
+                // Alert yerine bildirim kullan
+                showNotification(`Level ${currentLevel}'e ulaştınız!`);
+                
+                resetForNextLevel();
+            }
+            updateLevelInfo();
+        }
+
+        // Yeni level için sıfırlama
+        function resetForNextLevel() {
+            pins = [];
+            score = 0;
+            gameOver = false;
+            scoreElement.textContent = 'Skor: ' + score;
+            pins.push(new Pin(0));
+            updateLevelInfo();
+        }
+
+        // Oyunu tamamen sıfırla
+        function resetGame() {
+            currentLevel = 1;
+            targetPins = 5;
+            rotationSpeed = 0.02;
+            pins = [];
+            score = 0;
+            gameOver = false;
+            scoreElement.textContent = 'Skor: ' + score;
+            pins.push(new Pin(0));
+            updateLevelInfo();
+        }
+
+        // Oyunu başlatma fonksiyonunu güncelle
+        function startGame() {
+            resetGame();
+            gameLoop();
+            // Arkaplan müziğini başlat
+            backgroundMusic.play().catch(error => {
+                console.log("Müzik otomatik başlatılamadı:", error);
+            });
+        }
+
+        // Çarpışma kontrolünde score artırma kısmını güncelle
+        function checkCollision(newPin) {
+            for (let pin of pins) {
+                if (pin !== newPin) {
+                    let angleDiff = Math.abs(pin.angle - newPin.angle);
+                    
+                    angleDiff = angleDiff % (Math.PI * 2);
+                    if (angleDiff > Math.PI) {
+                        angleDiff = (Math.PI * 2) - angleDiff;
+                    }
+
+                    const angleDiffDegrees = (angleDiff * 180) / Math.PI;
+
+                    const distance = Math.sqrt(
+                        Math.pow(pin.startX - newPin.startX, 2) + 
+                        Math.pow(pin.startY - newPin.startY, 2)
+                    );
+
+                    const minSafeDistance = (pin.headSize + newPin.headSize + 5);
+
+                    if (distance < minSafeDistance || angleDiffDegrees < 8) {
+                        gameOver = true;
+                        // Sesleri ayarla
+                        backgroundMusic.pause();
+                        backgroundMusic.currentTime = 0;
+                        gameOverSound.currentTime = 0;
+                        gameOverSound.play();
+                        
+                        showNotification(`Oyun Bitti!\nLevel: ${currentLevel}\nSkor: ${score}`, 3000);
+                        setTimeout(() => {
+                            resetGame();
+                            // Oyun yeniden başladığında müziği tekrar başlat
+                            backgroundMusic.play();
+                        }, 2000);
+                        return;
+                    }
+                }
+            }
+            
+            score++;
+            scoreElement.textContent = 'Skor: ' + score;
+            checkLevelUp();
+        }
+
+        function gameLoop() {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            drawMainCircle();
+            
+            for (let i = 0; i < pins.length; i++) {
+                pins[i].isColliding = false;
+                for (let j = 0; j < pins.length; j++) {
+                    if (i !== j) {
+                        const distance = Math.sqrt(
+                            Math.pow(pins[i].startX - pins[j].startX, 2) + 
+                            Math.pow(pins[i].startY - pins[j].startY, 2)
+                        );
+                        if (distance < (pins[i].headSize + pins[j].headSize + 5)) {
+                            pins[i].isColliding = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            for (let pin of pins) {
+                pin.update();
+                pin.draw();
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        function drawMainCircle() {
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = colors.primary;
+            
+            const gradient = ctx.createRadialGradient(
+                centerX, centerY, 0,
+                centerX, centerY, mainCircle.radius
+            );
+            gradient.addColorStop(0, colors.primary);
+            gradient.addColorStop(1, colors.secondary);
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, mainCircle.radius, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            
+            ctx.strokeStyle = colors.border;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+        }
+
+        function createNewPin() {
+            if (!gameOver && !currentPin) {
+                shootSound.currentTime = 0;
+                shootSound.play();
+                
+                currentPin = new Pin(Math.PI / 2);
+                currentPin.isMoving = true;
+                pins.push(currentPin);
+                currentPin = null;
+            }
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space') {
+                createNewPin();
+            }
+        });
+
+        canvas.addEventListener('click', () => {
+            createNewPin();
+        });
+
+        canvas.addEventListener('touchstart', (event) => {
+            event.preventDefault();
+            createNewPin();
+        });
+
+        // Oyunu başlat
+        startGame();
+    </script>
+</body>
+</html> 
